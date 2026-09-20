@@ -1,4 +1,4 @@
-"""Jev-compatible System One server backed by a local Ollama model."""
+"""Jev-compatible System One server backed by a local inference server."""
 
 from __future__ import annotations
 
@@ -84,18 +84,28 @@ async def system_one(payload: SystemOneRequest) -> dict[str, Any]:
 @app.get("/v1/models")
 async def list_models() -> dict[str, Any]:
     try:
-        backend_names = set(await backend.list_backend_models())
+        backend_names = await backend.list_backend_models()
     except httpx.HTTPError:
-        backend_names = set()
+        backend_names = []
 
-    models = [
-        entry
-        for entry in MODEL_CATALOG
-        if not backend_names or entry["name"] in backend_names
-    ]
-    if not models:
-        models = MODEL_CATALOG
-    return {"models": models}
+    # llama-server holds exactly one model and reports it by file path, which never
+    # matches a catalog name. Advertising the catalog there would overstate what the
+    # backend can serve, so report the single served model instead.
+    if backend.BACKEND == "llamacpp":
+        served = backend_names[0] if backend_names else "local"
+        return {
+            "models": [
+                {
+                    "name": served,
+                    "description": "Local llama.cpp-backed System One model.",
+                    "release_date": "2026-01-01",
+                }
+            ]
+        }
+
+    names = set(backend_names)
+    models = [entry for entry in MODEL_CATALOG if not names or entry["name"] in names]
+    return {"models": models or MODEL_CATALOG}
 
 
 def run() -> None:
